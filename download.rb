@@ -238,7 +238,7 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
     cookies_filename = nil
     page = get(url)
   end
-  if page =~ /Plik zosta. usuni.ty/
+  if page =~ /Plik zosta/
     raise FileDeletedException
   end
   #if not loged
@@ -248,7 +248,6 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
       raise FileToBigException
     end
   else
-    #if page =~ 
     loged = true
   end
   if page =~ /<p class="download-popup-abonament-button-box">[^<]*<a href="([^"]*)">/
@@ -274,7 +273,6 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
       else
         url = res['Location']
       end
-      puts url
       wget(url, limit, filename, referer)
     else
       wget("http://www.przeklej.pl#{uri}", limit, filename, referer)
@@ -323,7 +321,7 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
           puts "You can't download that file (buy more transfer)"
         end
       else
-        puts "File Too Big"
+        puts "File too big for download (try to login)"
       end
     rescue FileDeletedException
       puts "File Deleted"
