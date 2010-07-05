@@ -9,6 +9,8 @@ you must have installed Ruby
 
 you can use it in terminal
 
+download.rb <url>
+
 If you have file with urls
 download.rb -f <filename>
 
