@@ -141,7 +141,7 @@ end
 def four_shared(url, limit=false)
   page = get(url)
   if page =~ /a href="([^"]*)" class="dbtn" tabindex="1"><span><span><font>Pobierz teraz<\/font>/
-    page = get($1)
+    page = get($1, nil, url)
     if page =~ /<a href='([^']*)'>Download file now<\/a>/
       url = $1
       page =~ /<b class="blue xlargen">([^<]*)</
@@ -223,6 +223,7 @@ def fix_filename(filename)
 end
 
 def przeklej(url, limit=false, user=nil, passwd=nil)
+  referer = url
   if user and passwd
     cookies = przeklej_login_cookies(user, passwd)
     cookies_filename = 'download_przeklej_cookies.txt'
@@ -261,9 +262,15 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
       page =~ /var myhref = "([^"]*)"/
       get("http://www.przeklej.pl#{$1}#{(rand*1000).floor}", cookies, url)
       res = response("http://www.przeklej.pl#{uri}", cookies, url)
-      wget(res['Location'], limit, filename, url)
+      if not res['Location'] =~ /http:\/\//
+        url = "http://www.przeklej.pl#{res['Location']}"
+      else
+        url = res['Location']
+      end
+      puts url
+      wget(url, limit, filename, referer)
     else
-      wget("http://www.przeklej.pl#{uri}", limit, filename, url)
+      wget("http://www.przeklej.pl#{uri}", limit, filename, referer)
     end
   end
   if user and passwd
@@ -274,7 +281,7 @@ end
 def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
   url = url.strip
   case host(url)
-  when 'www.4shared.com' 
+  when 'www.4shared.com'
     four_shared(url, limit)
   when 'rapidshare.com'
     begin
@@ -293,7 +300,7 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
       else
         puts "Limit Reached"
       end
-    rescue LinkErrorExeption
+    rescue LinkErrorException
       puts "Link Error"
     rescue FileDeletedExepction
       puts "File was removed"
