@@ -35,6 +35,9 @@ end
 class LinkErrorException < Exception
 end
 
+class TransferLimitException < Exception
+end
+
 def title(string)
   return string.split(' ').map {|word| word.capitalize }.join(' ')
 end
@@ -245,6 +248,7 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
       raise FileToBigException
     end
   else
+    #if page =~ 
     loged = true
   end
   if page =~ /<p class="download-popup-abonament-button-box">[^<]*<a href="([^"]*)">/
@@ -260,7 +264,10 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
     if loged
       #send request (simulate XHR)
       page =~ /var myhref = "([^"]*)"/
-      get("http://www.przeklej.pl#{$1}#{(rand*1000).floor}", cookies, url)
+      check = get("http://www.przeklej.pl#{$1}#{(rand*1000).floor}", cookies, url)
+      if check =~ /"return_code":1/
+        raise TransferLimitException
+      end
       res = response("http://www.przeklej.pl#{uri}", cookies, url)
       if not res['Location'] =~ /http:\/\//
         url = "http://www.przeklej.pl#{res['Location']}"
@@ -310,7 +317,11 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
       przeklej(url, limit)
     rescue FileToBigException
       if user and passwd
-        przeklej(url, limit, user, passwd)
+        begin
+          przeklej(url, limit, user, passwd)
+        rescue TransferLimitException
+          puts "You can't download that file (buy more transfer)"
+        end
       else
         puts "File Too Big"
       end
