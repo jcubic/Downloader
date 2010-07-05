@@ -302,7 +302,7 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
       end
     rescue LinkErrorException
       puts "Link Error"
-    rescue FileDeletedExepction
+    rescue FileDeletedException
       puts "File was removed"
     end
   when 'www.przeklej.pl'
