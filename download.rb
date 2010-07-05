@@ -90,6 +90,7 @@ def post(url, data)
   return res.body
 end
 
+
 def wait_indicator(time)
   while time >= 0
     system('tput sc; echo -n "Wait ' + time.to_s + ' seconds  "; tput rc') 
@@ -164,6 +165,7 @@ def rapidshare(url, limit=false)
   end
   if page =~ /the file has been removed from the server/
     raise FileDeletedExepction
+  end
   if page =~ /<form id="[^"]*" action="([^"]*)"/
     page = post($1, {'dl.start'=> 'Free'})
     if page =~ /You have reached the download limit for free-users/
@@ -233,7 +235,7 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
     page = get(url)
   end
   if page =~ /Plik zosta. usuni.ty/
-    raise FileDeleted
+    raise FileDeletedException
   end
   #if not loged
   if not page =~ /Wyloguj/
@@ -250,7 +252,7 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
     uri = $1
   end
   if page =~ /B..dny parametr w linku/
-    raise LinkError
+    raise LinkErrorException
   end
   if page =~ /title="Pobierz plik">([^<]*)<\/a>/
     filename = fix_filename($1)
