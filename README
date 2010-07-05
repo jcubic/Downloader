@@ -1,0 +1,18 @@
+Copyright(c) 2010 Jakub Jankiewicz
+
+File Site Hosting Downloader
+
+Requirements
+you must have installed Ruby
+
+you can use it in terminal
+
+If you have file with urls
+download.rb -f <filename>
+
+If you have live box you can't use reconection when download file from Rapidshare
+download.rb -l <your livebox password> -f <filename>
+
+If you download file from przeklej.pl you can provide password and login for download file larger than 50MB
+
+download.rb -u <user name> -p <password> -f <filename>
