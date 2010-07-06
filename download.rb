@@ -167,7 +167,7 @@ def rapidshare(url, limit=false)
     raise LinkErrorException
   end
   if page =~ /the file has been removed from the server/
-    raise FileDeletedExepction
+    raise FileDeletedException
   end
   if page =~ /<form id="[^"]*" action="([^"]*)"/
     page = post($1, {'dl.start'=> 'Free'})
@@ -300,7 +300,7 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
           connect('192.168.1.1', livebox_passwd)
           rapidshare(url, limit)
         rescue DownloadLimitException
-          download(url, limit)
+          download(url, limit, nil, nil, livebox_passwd)
         end
       else
         puts "Limit Reached"
@@ -338,13 +338,13 @@ def usage()
   puts "download.rb [-u | --user <user>] [-p | --passwd <password>]"
   puts "            [-r | --limit-rate <limit>] [--help]"
   puts "            [-l | --livebox-passwd <password>]"
-  puts "            (-f | --file <filename) | <url>"
-  puts "-u --user [user]        - user for przeklej.pl"
+  puts "            (-f | --file <filename>) | <url>"
+  puts "\n-u --user [user]        - user for przeklej.pl"
   puts "-p --passwd [password]  - passowrd for przeklej.pl"
   puts "-r --limit-rate [rate]  - slow down file transfer" 
   puts "-l --livebox-passwd     - password if you using Orange livebox"
   puts "                          for automatic reconect (change ADSL dynamic IP)"
-  puts "\n-f --file [filename]    - file with urls to download"
+  puts "-f --file [filename]    - file with urls to download"
 end
 
 begin 
