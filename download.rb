@@ -226,60 +226,66 @@ def fix_filename(filename)
 end
 
 def przeklej(url, limit=false, user=nil, passwd=nil)
-  referer = url
-  if user and passwd
-    cookies = przeklej_login_cookies(user, passwd)
-    cookies_filename = 'download_przeklej_cookies.txt'
-    File.open(cookies_filename, 'w') {|file|
-      file.puts cookies
-    }
-    page = get(url, cookies)
-  else
-    cookies_filename = nil
-    page = get(url)
-  end
-  if page =~ /Plik zosta/
-    raise FileDeletedException
-  end
-  #if not loged
-  if not page =~ /Wyloguj/
-    loged = false
-    if page =~ /pny <strong>abonament<\/strong>/
-      raise FileToBigException
-    end
-  else
-    loged = true
-  end
-  if page =~ /<p class="download-popup-abonament-button-box">[^<]*<a href="([^"]*)">/
-    uri = $1
-  elsif page =~ /<a class="download" href="([^"]*)"/
-    uri = $1
-  end
-  if page =~ /B..dny parametr w linku/
-    raise LinkErrorException
-  end
-  if page =~ /title="Pobierz plik">([^<]*)<\/a>/
-    filename = fix_filename($1)
-    if loged
-      #send request (simulate XHR)
-      page =~ /var myhref = "([^"]*)"/
-      check = get("http://www.przeklej.pl#{$1}#{(rand*1000).floor}", cookies, url)
-      if check =~ /"return_code":1/
-        raise TransferLimitException
-      end
-      res = response("http://www.przeklej.pl#{uri}", cookies, url)
-      if not res['Location'] =~ /http:\/\//
-        url = "http://www.przeklej.pl#{res['Location']}"
-      else
-        url = res['Location']
-      end
-      wget(url, limit, filename, referer)
+  begin
+    referer = url
+    if user and passwd
+      cookies = przeklej_login_cookies(user, passwd)
+      cookies_filename = 'download_przeklej_cookies.txt'
+      File.open(cookies_filename, 'w') {|file|
+        file.puts cookies
+      }
+      page = get(url, cookies)
     else
-      wget("http://www.przeklej.pl#{uri}", limit, filename, referer)
+      cookies_filename = nil
+      page = get(url)
     end
-  end
-  if user and passwd
+    if page =~ /Plik zosta/
+      raise FileDeletedException
+    end
+    #if not loged
+    if not page =~ /Wyloguj/
+      loged = false
+      if page =~ /pny <strong>abonament<\/strong>/
+        raise FileToBigException
+      end
+    else
+      loged = true
+    end
+    if page =~ /<p class="download-popup-abonament-button-box">[^<]*<a href="([^"]*)">/
+      uri = $1
+    elsif page =~ /<a class="download" href="([^"]*)"/
+      uri = $1
+    end
+    if page =~ /B..dny parametr w linku/
+      raise LinkErrorException
+    end
+    if page =~ /title="Pobierz plik">([^<]*)<\/a>/
+      filename = fix_filename($1)
+      if loged
+        #send request (simulate XHR)
+        page =~ /var myhref = "([^"]*)"/
+        check = get("http://www.przeklej.pl#{$1}#{(rand*1000).floor}", cookies, url)
+        if check =~ /"return_code":1/
+          raise TransferLimitException
+        end
+        res = response("http://www.przeklej.pl#{uri}", cookies, url)
+        if not res['Location'] =~ /http:\/\//
+          url = "http://www.przeklej.pl#{res['Location']}"
+        else
+          url = res['Location']
+        end
+        wget(url, limit, filename, referer)
+      else
+        wget("http://www.przeklej.pl#{uri}", limit, filename, referer)
+      end
+    end
+    if user and passwd
+      przeklej_logout
+    end
+  rescue Interrupt
+    puts "\nprzeklej disconnectiong..."
     przeklej_logout
+    raise
   end
 end
 
@@ -374,14 +380,19 @@ livebox_passwd = opts['--livebox-passwd']
 
 
 if filename
-  File.open(filename) {|file|
-    file.each{|url|
-      #skip blank lines, comments and invalid urls
-      if not url =~ /^ *$/ and not url =~ /^ *#.*$/ and url =~ /^http:\/\//
-        download(url, limit, user, passwd, livebox_passwd)
-      end
+  begin
+    File.open(filename) {|file|
+      file.each{|url|
+        #skip blank lines, comments and invalid urls
+        if not url =~ /^ *$/ and not url =~ /^ *#.*$/ and url =~ /^http:\/\//
+          download(url, limit, user, passwd, livebox_passwd)
+        end
+      }
     }
-  }
+  rescue Interrupt
+    puts "Download break by user"
+    exit(1)
+  end
 else
   if ARGV.length == 0
     usage
