@@ -73,7 +73,7 @@ class GetOpt
   end
 end
 
-def get(url, cookies=nil, referer=nil)
+def response(url, cookies=nil, referer=nil)
   url = URI.parse(trail_slash(url))
   http = Net::HTTP.new(url.host)
   headers = {}
@@ -84,7 +84,7 @@ def get(url, cookies=nil, referer=nil)
     headers['Referer'] = referer
   end
   res = http.get(url.path, headers)
-  return res.body
+  return res
 end
 
 def post(url, data)
@@ -92,7 +92,6 @@ def post(url, data)
   res = Net::HTTP.post_form(url, data)
   return res.body
 end
-
 
 def wait_indicator(time)
   while time >= 0
@@ -142,9 +141,13 @@ def wget(url, limit=false, filename=nil, referer=nil, cookies=nil)
 end
 
 def four_shared(url, limit=false)
-  page = get(url)
-  if page =~ /a href="([^"]*)" class="dbtn" tabindex="1"><span><span><font>Pobierz teraz<\/font>/
-    page = get($1, nil, url)
+  res = response(url)
+  if res.body =~ /a href="([^"]*)" class="dbtn"/
+    page = response($1, res.response['set-cookie'], url).body
+    cookies_filename = 'download_4shared_cookies.txt'
+    File.open(cookies_filename, 'w') {|file|
+      file.puts res.response['set-cookie']
+    }
     if page =~ /<a href='([^']*)'>Download file now<\/a>/
       url = $1
       page =~ /<b class="blue xlargen">([^<]*)</
@@ -156,17 +159,20 @@ def four_shared(url, limit=false)
         #use nice wait indicator on unix (require tput)
         wait_indicator($1.to_i)
       end
-      wget(url, limit, filename)
+      wget(url, limit, filename, nil, cookies_filename)
     end
   end
 end
 
 def rapidshare(url, limit=false)
-  page = get(url)
+  page = response(url).body
   if page =~ /The file could not be found/
     raise LinkErrorException
   end
   if page =~ /the file has been removed from the server/
+    raise FileDeletedException
+  end
+  if page =~ /The uploader has removed this/
     raise FileDeletedException
   end
   if page =~ /<form id="[^"]*" action="([^"]*)"/
@@ -190,19 +196,7 @@ def rapidshare(url, limit=false)
   end
 end
 
-def response(url, cookies=nil, referer=nil)
-  url = URI.parse(trail_slash(url))
-  http = Net::HTTP.new(url.host)
-  headers = {}
-  if cookies
-    headers['Cookie'] = cookies
-  end
-  if referer
-    headers['Referer'] = referer
-  end
-  res = http.get(url.path, headers)
-  return res.response
-end
+
 
 def przeklej_login_cookies(user, passwd)
   url = URI.parse('http://www.przeklej.pl/loguj')
@@ -213,11 +207,6 @@ def przeklej_login_cookies(user, passwd)
   return res.response['set-cookie']
 end
 
-def przeklej_logout()
-  url = 'http://przeklej.pl/wyloguj'
-  return get(url)
-end
-
 def fix_filename(filename)
   filename = filename.gsub(/ +/, ' ')
   filename = filename.gsub(' .', '.')
@@ -226,116 +215,112 @@ def fix_filename(filename)
 end
 
 def przeklej(url, limit=false, user=nil, passwd=nil)
-  begin
-    referer = url
-    if user and passwd
-      cookies = przeklej_login_cookies(user, passwd)
-      cookies_filename = 'download_przeklej_cookies.txt'
-      File.open(cookies_filename, 'w') {|file|
-        file.puts cookies
-      }
-      page = get(url, cookies)
-    else
-      cookies_filename = nil
-      page = get(url)
+  referer = url
+  if user and passwd
+    cookies = przeklej_login_cookies(user, passwd)
+    cookies_filename = 'download_przeklej_cookies.txt'
+    File.open(cookies_filename, 'w') {|file|
+      file.puts cookies
+    }
+    page = response(url, cookies).body
+  else
+    cookies_filename = nil
+    page = response(url).body
+  end
+  if page =~ /Plik zosta/
+    raise FileDeletedException
+  end
+  #if not loged
+  if not page =~ /Wyloguj/
+    loged = false
+    if page =~ /pny <strong>abonament<\/strong>/
+      raise FileToBigException
     end
-    if page =~ /Plik zosta/
-      raise FileDeletedException
-    end
-    #if not loged
-    if not page =~ /Wyloguj/
-      loged = false
-      if page =~ /pny <strong>abonament<\/strong>/
-        raise FileToBigException
+  else
+    loged = true
+  end
+  if page =~ /<p class="download-popup-abonament-button-box">[^<]*<a href="([^"]*)">/
+    uri = $1
+  elsif page =~ /<a class="download" href="([^"]*)"/
+    uri = $1
+  end
+  if page =~ /B..dny parametr w linku/
+    raise LinkErrorException
+  end
+  if page =~ /title="Pobierz plik">([^<]*)<\/a>/
+    filename = fix_filename($1)
+    if loged
+      #send request (simulate XHR)
+      page =~ /var myhref = "([^"]*)"/
+      check = response("http://www.przeklej.pl#{$1}#{(rand*1000).floor}", cookies, url).body
+      if check =~ /"return_code":1/
+        raise TransferLimitException
       end
-    else
-      loged = true
-    end
-    if page =~ /<p class="download-popup-abonament-button-box">[^<]*<a href="([^"]*)">/
-      uri = $1
-    elsif page =~ /<a class="download" href="([^"]*)"/
-      uri = $1
-    end
-    if page =~ /B..dny parametr w linku/
-      raise LinkErrorException
-    end
-    if page =~ /title="Pobierz plik">([^<]*)<\/a>/
-      filename = fix_filename($1)
-      if loged
-        #send request (simulate XHR)
-        page =~ /var myhref = "([^"]*)"/
-        check = get("http://www.przeklej.pl#{$1}#{(rand*1000).floor}", cookies, url)
-        if check =~ /"return_code":1/
-          raise TransferLimitException
-        end
-        res = response("http://www.przeklej.pl#{uri}", cookies, url)
-        if not res['Location'] =~ /http:\/\//
-          url = "http://www.przeklej.pl#{res['Location']}"
-        else
-          url = res['Location']
-        end
-        wget(url, limit, filename, referer)
+      res = response("http://www.przeklej.pl#{uri}", cookies, url).response
+      if not res['Location'] =~ /http:\/\//
+        url = "http://www.przeklej.pl#{res['Location']}"
       else
-        wget("http://www.przeklej.pl#{uri}", limit, filename, referer)
+        url = res['Location']
       end
+        wget(url, limit, filename, referer)
+    else
+      wget("http://www.przeklej.pl#{uri}", limit, filename, referer)
     end
-    if user and passwd
-      przeklej_logout
-    end
-  rescue Interrupt
-    puts "\nprzeklej disconnectiong..."
-    przeklej_logout
-    raise
   end
 end
 
 def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
-  url = url.strip
-  case host(url)
-  when 'www.4shared.com'
-    four_shared(url, limit)
-  when 'rapidshare.com'
-    begin
-      rapidshare(url, limit)
-    rescue DownloadLimitException
-      if livebox_passwd
-        puts "Limit reached, change IP."
-        #double check
-        begin
-          disconnect('192.168.1.1', livebox_passwd)
-          connect('192.168.1.1', livebox_passwd)
-          rapidshare(url, limit)
-        rescue DownloadLimitException
-          download(url, limit, nil, nil, livebox_passwd)
+  begin
+    url = url.strip
+    case host(url)
+    when 'www.4shared.com'
+      four_shared(url, limit)
+    when 'rapidshare.com'
+      begin
+        rapidshare(url, limit)
+      rescue DownloadLimitException
+        if livebox_passwd
+          puts "Limit reached, change IP."
+          #double check
+          begin
+            disconnect('192.168.1.1', livebox_passwd)
+            connect('192.168.1.1', livebox_passwd)
+            rapidshare(url, limit)
+          rescue DownloadLimitException
+            download(url, limit, nil, nil, livebox_passwd)
+          end
+        else
+          puts "Limit Reached"
         end
-      else
-        puts "Limit Reached"
+      rescue LinkErrorException
+        puts "Link Error"
+      rescue FileDeletedException
+        puts "File was removed"
       end
-    rescue LinkErrorException
-      puts "Link Error"
-    rescue FileDeletedException
-      puts "File was removed"
-    end
-  when 'www.przeklej.pl'
-    begin
-      przeklej(url, limit)
-    rescue FileToBigException
-      if user and passwd
-        begin
-          przeklej(url, limit, user, passwd)
-        rescue TransferLimitException
-          puts "You can't download that file (buy more transfer)"
+    when 'www.przeklej.pl'
+      begin
+        przeklej(url, limit)
+      rescue FileToBigException
+        if user and passwd
+          begin
+            przeklej(url, limit, user, passwd)
+          rescue TransferLimitException
+            puts "You can't download that file (buy more transfer)"
+          end
+        else
+          puts "File too big for download (try to login)"
         end
-      else
-        puts "File too big for download (try to login)"
+      rescue FileDeletedException
+        puts "File Deleted"
+      rescue LinkErrorException
+        puts "Link Error"
       end
-    rescue FileDeletedException
-      puts "File Deleted"
-    rescue LinkErrorException
-      puts "Link Error"
+    else
+      puts "unknown host \"#{host(url)}\" - skip"
     end
-  else
-    puts "unknown host \"#{host(url)}\" - skip"
+  rescue SocketError => e
+    puts "'#{e.message}' probibly your internet connection is down"
+    exit(1)
   end
 end
 
@@ -390,7 +375,7 @@ if filename
       }
     }
   rescue Interrupt
-    puts "Download break by user"
+    #silent exit
     exit(1)
   end
 else
