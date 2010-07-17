@@ -16,9 +16,10 @@
 #    You should have received a copy of the GNU General Public License
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-require "net/http"
-require "uri"
-require "getoptlong"
+require 'net/http'
+require 'uri'
+require 'getoptlong'
+require 'rexml/document'
 
 class DownloadLimitException < Exception
 end
@@ -269,10 +270,60 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
   end
 end
 
+def wrzuta(url, limit=false)
+  page = response(url).body
+  #default values taken from decompiled swf music player
+  if page =~ /'key' : '([^']*)',/
+    key = $1
+  else
+    key = '4KWNcfGaCak'
+  end
+  if page =~ /'login' : '([^']*)',/
+    login = $1
+  else
+    login = 'lifthrasil'
+  end
+  if page =~ /'host' : '([^']*)',/
+    host = $1
+  else
+    host = 'labs.wrzuta.pl'
+  end
+  if page =~ /'site' : '([^']*)',/
+    site = $1
+  else
+    site = 'wrzuta.pl'
+  end
+  if page =~ /'lang' : '([^']*)',/
+    lang = $1
+  end
+  if key and login and host and site and lang
+    if lang == 'pl'
+      _local2 = 'plik'
+    else 
+      _local2 = 'file'
+    end
+    rnd = (rand*1000000).floor
+    url = "http://#{login}.labs.#{host}/xml/#{_local2}/#{key}/sa/#{site}/#{rnd}"
+    
+    response = REXML::Document.new(response(url).body).root
+    
+    url = response.elements['//file/storeIds/fileId'][0]
+    filename = response.elements['//name'][0]
+    wget(url, limit, filename)
+  end
+end
+
+
 def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
   begin
     url = url.strip
     case host(url)
+    when /.*\.wrzuta.pl/
+      if url =~ /wrzuta.pl\/audio/
+        wrzuta(url, limit)
+      else
+        puts "only audio files suported"
+      end
     when 'www.4shared.com'
       four_shared(url, limit)
     when 'rapidshare.com'
@@ -376,6 +427,9 @@ if filename
     }
   rescue Interrupt
     #silent exit
+    exit(1)
+  rescue Timeout::Error
+    puts "timeout Error"
     exit(1)
   end
 else
