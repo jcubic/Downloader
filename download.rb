@@ -303,27 +303,22 @@ def wrzuta(url, limit=false)
       _local2 = 'file'
     end
     rnd = (rand*1000000).floor
-    url = "http://#{login}.labs.#{host}/xml/#{_local2}/#{key}/sa/#{site}/#{rnd}"
+    url = "http://#{login}.#{host}/xml/#{_local2}/#{key}/sa/#{site}/#{rnd}"
     
-    response = REXML::Document.new(response(url).body).root
+    xml = REXML::Document.new(response(url).body).root
     
-    url = response.elements['//file/storeIds/fileId'][0]
-    filename = response.elements['//name'][0]
+    url = xml.elements['//file/storeIds/fileId'][0]
+    filename = xml.elements['//name'][0]
     wget(url, limit, filename)
   end
 end
-
 
 def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
   begin
     url = url.strip
     case host(url)
     when /.*\.wrzuta.pl/
-      if url =~ /wrzuta.pl\/audio/
-        wrzuta(url, limit)
-      else
-        puts "only audio files suported"
-      end
+      wrzuta(url, limit)
     when 'www.4shared.com'
       four_shared(url, limit)
     when 'rapidshare.com'
