@@ -39,6 +39,9 @@ end
 class TransferLimitException < Exception
 end
 
+class BadPasswordException < Exception
+end
+
 def title(string)
   return string.split(' ').map {|word| word.capitalize }.join(' ')
 end
@@ -111,7 +114,11 @@ def livebox_send(data, host, passwd)
   res = Net::HTTP.new(url.host, url.port).start {|http|
     http.request(req)
   }
-  return res.body
+  if res.code == 401
+    raise BadPasswordException.new("bad password")
+  else
+    return res.body
+  end
 end
 
 def connect(host, passwd)
@@ -149,16 +156,17 @@ def four_shared(url, limit=false)
     File.open(cookies_filename, 'w') {|file|
       file.puts res.response['set-cookie']
     }
-    if page =~ /<a href='([^']*)'>Download file now<\/a>/
+    if page =~ /<a href='([^']*)'>(Download file now|Pobierz plik teraz)<\/a>/
       url = $1
       page =~ /<b class="blue xlargen">([^<]*)</
       filename = $1
-      page =~ /var c=([0-9]*);/
+      page =~ /var c[= ]+([0-9]*);/
+	  time = $1.to_i
       if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
-        puts "Wait #{$1} seconds."
+        puts "Wait #{time} seconds."
       else
         #use nice wait indicator on unix (require tput)
-        wait_indicator($1.to_i)
+        wait_indicator(time)
       end
       wget(url, limit, filename, nil, cookies_filename)
     end
@@ -177,6 +185,7 @@ def rapidshare(url, limit=false)
     raise FileDeletedException
   end
   if page =~ /<form id="[^"]*" action="([^"]*)"/
+	#puts "found #{$1}"
     page = post($1, {'dl.start'=> 'Free'})
     if page =~ /You have reached the download limit for free-users/
       raise DownloadLimitException
@@ -334,6 +343,8 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
             rapidshare(url, limit)
           rescue DownloadLimitException
             download(url, limit, nil, nil, livebox_passwd)
+          rescue BadPasswordException
+            puts "Bad password"
           end
         else
           puts "Limit Reached"
@@ -416,16 +427,19 @@ if filename
       file.each{|url|
         #skip blank lines, comments and invalid urls
         if not url =~ /^ *$/ and not url =~ /^ *#.*$/ and url =~ /^http:\/\//
-          download(url, limit, user, passwd, livebox_passwd)
+          begin
+            download(url, limit, user, passwd, livebox_passwd)
+          rescue Timeout::Error, Errno::ETIMEDOUT
+            puts "timeout Error, try again"
+            redo
+          end
         end
       }
     }
-  rescue Interrupt
+  rescue Interrupt, Errno::EINTR
     #silent exit
     exit(1)
-  rescue Timeout::Error
-    puts "timeout Error"
-    exit(1)
+  
   end
 else
   if ARGV.length == 0
