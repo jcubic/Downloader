@@ -39,6 +39,9 @@ end
 class TransferLimitException < Exception
 end
 
+class ServerBuisyException < Exception
+end
+
 class BadPasswordException < Exception
 end
 
@@ -185,20 +188,23 @@ def rapidshare(url, limit=false)
     raise FileDeletedException
   end
   if page =~ /<form id="[^"]*" action="([^"]*)"/
-	#puts "found #{$1}"
-    page = post($1, {'dl.start'=> 'Free'})
+    page = post($1 + '#dlt', {'dl.start'=> 'Free'})
     if page =~ /You have reached the download limit for free-users/
       raise DownloadLimitException
     end
     if page =~ /Your IP address .* is already downloading a file/
       raise DownloadInProgress
     end
+    if page =~ /Currently a lot of users are downloading files/ or
+       page =~ /Unfortunately right now our servers are overloaded/
+      raise ServerBuisyException
+    end
     page =~ /<form name="[^"]*" action="([^"]*)"/
     url = $1
     page =~ /var c=([0-9]*);/
     time = $1.to_i
     if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
-      puts "Wait #{$1} seconds."
+      puts "Wait #{time} seconds."
     else
       wait_indicator(time)
     end
@@ -322,10 +328,39 @@ def wrzuta(url, limit=false)
   end
 end
 
+def filesonic(url, limit)
+    url =~ /\/([^\/]*)$/
+    filename = $1
+    puts "download #{filename}"
+    res = response(url)
+    puts "\n1 headers"
+    res.each {|k,v| puts "#{k}: #{v}"}
+    referer = url
+    url = "http://#{host(url)}#{res['Location']}"
+    page = response(url, res['set-cookie'], referer).body
+    puts page
+    if page =~ /<a href="([^"]*)" id="free_download">/
+        puts "found link #{$1}"
+        page = response($1).body
+        page =~ /var countDownDelay = ([0-9]*);/
+        time = $1
+        page =~ /var downloadUrl = "([^"]*)"/
+        url = $1
+        if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
+            puts "Wait #{time} seconds."
+        else
+            wait_indicator(time)
+        end
+        wget(url, limit, filename)
+    end
+end
+
 def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
   begin
     url = url.strip
     case host(url)
+    when 'www.filesonic.com'
+        filesonic(url, limit)
     when /.*\.wrzuta.pl/
       wrzuta(url, limit)
     when 'www.4shared.com'
@@ -353,6 +388,8 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
         puts "Link Error"
       rescue FileDeletedException
         puts "File was removed"
+      rescue ServerBuisyException
+        puts "Server is Buisy"
       end
     when 'www.przeklej.pl'
       begin

@@ -2,13 +2,12 @@ Copyright(c) 2010 Jakub Jankiewicz
 
 File Site Hosting Downloader
 
-It Support download from rapidshare, 4shared, przeklej and wrzuta
+It Support download from rapidshare, 4shared, filesonic, przeklej and wrzuta
 
 Requirements
-you must have installed Ruby
+you must have installed Ruby and wget
 
 you can use it in terminal
-
 download.rb <url>
 
 If you have file with urls
