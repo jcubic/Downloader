@@ -39,7 +39,7 @@ end
 class TransferLimitException < Exception
 end
 
-class ServerBuisyException < Exception
+class ServerBusyException < Exception
 end
 
 class BadPasswordException < Exception
@@ -197,7 +197,7 @@ def rapidshare(url, limit=false)
     end
     if page =~ /Currently a lot of users are downloading files/ or
        page =~ /Unfortunately right now our servers are overloaded/
-      raise ServerBuisyException
+      raise ServerBusyException
     end
     page =~ /<form name="[^"]*" action="([^"]*)"/
     url = $1
@@ -388,7 +388,7 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
         puts "Link Error"
       rescue FileDeletedException
         puts "File was removed"
-      rescue ServerBuisyException
+      rescue ServerBusyException
         puts "Server is Buisy"
       end
     when 'www.przeklej.pl'
