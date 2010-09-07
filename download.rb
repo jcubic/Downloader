@@ -380,6 +380,8 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
             download(url, limit, nil, nil, livebox_passwd)
           rescue BadPasswordException
             puts "Bad password"
+          rescue ServerBusyException
+            puts "Server is Buisy"
           end
         else
           puts "Limit Reached"
@@ -390,6 +392,8 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
         puts "File was removed"
       rescue ServerBusyException
         puts "Server is Buisy"
+      rescue DownloadInProgress
+        puts "You are already downloading"
       end
     when 'www.przeklej.pl'
       begin
