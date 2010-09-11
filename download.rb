@@ -331,19 +331,14 @@ end
 def filesonic(url, limit)
     url =~ /\/([^\/]*)$/
     filename = $1
-    puts "download #{filename}"
     res = response(url)
-    puts "\n1 headers"
-    res.each {|k,v| puts "#{k}: #{v}"}
     referer = url
-    url = "http://#{host(url)}#{res['Location']}"
-    page = response(url, res['set-cookie'], referer).body
-    puts page
+    res['set-cookie'] =~ /(PHPSESSID=[^;]*);/
+    page = response(res['Location'], $1, referer).body
     if page =~ /<a href="([^"]*)" id="free_download">/
-        puts "found link #{$1}"
         page = response($1).body
         page =~ /var countDownDelay = ([0-9]*);/
-        time = $1
+        time = $1.to_i
         page =~ /var downloadUrl = "([^"]*)"/
         url = $1
         if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
