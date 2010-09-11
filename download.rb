@@ -337,15 +337,15 @@ def filesonic(url, limit)
     page = response(res['Location'], $1, referer).body
     if page =~ /<a href="([^"]*)" id="free_download">/
         page = response($1).body
-        page =~ /var countDownDelay = ([0-9]*);/
-        time = $1.to_i
+        #page =~ /var countDownDelay = ([0-9]*);/
+        #time = $1.to_i
         page =~ /var downloadUrl = "([^"]*)"/
         url = $1
-        if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
-            puts "Wait #{time} seconds."
-        else
-            wait_indicator(time)
-        end
+        #if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
+        #    puts "Wait #{time} seconds."
+        #else
+        #    wait_indicator(time)
+        #end
         wget(url, limit, filename)
     end
 end
