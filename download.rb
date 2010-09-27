@@ -211,9 +211,7 @@ def rapidshare(url, limit=false, livebox=nil)
   if res =~ /File deleted/
     raise FileDeletedException
   end
-  if res =~ /ERROR: /
-    raise LinkErrorException
-  end 
+ 
   if res =~ /You need to wait (.*) seconds/
     if livebox
       raise DownloadLimitException
@@ -225,6 +223,8 @@ def rapidshare(url, limit=false, livebox=nil)
       end
       rapidshare(url, limit, livebox)
     end
+  elsif res =~ /ERROR: /
+    raise LinkErrorException
   elsif res =~ /DL:([^,]*),([^,]*),([^,]*)/
     host = $1
     dlauth = $2
