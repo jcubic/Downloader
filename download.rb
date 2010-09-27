@@ -1,7 +1,7 @@
 #!/usr/bin/ruby
 #
 # this script is for downloading files from File Hosting Sites
-# Copyright (C) 2010 Jakub Jankiewicz
+# Copyright (C) 2010 Jakub Jankiewicz (jcubic@onet.pl)
 #
 #    This program is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -45,6 +45,9 @@ end
 class BadPasswordException < Exception
 end
 
+class NotConnectedException < Exception
+end
+
 def title(string)
   return string.split(' ').map {|word| word.capitalize }.join(' ')
 end
@@ -81,6 +84,9 @@ class GetOpt
 end
 
 def response(url, cookies=nil, referer=nil)
+  if url =~ /(\?.*)/
+    query = $1
+  end
   url = URI.parse(trail_slash(url))
   http = Net::HTTP.new(url.host)
   headers = {}
@@ -90,13 +96,25 @@ def response(url, cookies=nil, referer=nil)
   if referer
     headers['Referer'] = referer
   end
-  res = http.get(url.path, headers)
+  begin
+    if query
+      path = url.path + query
+    else
+      path = url.path
+    end
+    res = http.get(path, headers)
+  rescue NoMethodError
+    raise NotConnectedException
+  end
   return res
 end
 
 def post(url, data)
   url = URI.parse(trail_slash(url))
   res = Net::HTTP.post_form(url, data)
+  if !res
+    raise NotConnectedException
+  end
   return res.body
 end
 
@@ -176,43 +194,51 @@ def four_shared(url, limit=false)
   end
 end
 
-def rapidshare(url, limit=false)
-  page = response(url).body
-  if page =~ /The file could not be found/
+def rapidshare(url, limit=false, livebox=nil)
+  #download files using rapidshare api
+  if not url =~ /files\/([^\/]*)\/(.*)/
     raise LinkErrorException
   end
-  if page =~ /the file has been removed from the server/
+  fileid = $1
+  filename = $2
+  apiurl = 'http://api.rapidshare.com/cgi-bin/rsapi.cgi?sub=download_v1'
+  #use it for premium users
+  #url += "&login=#{login}&password=#{passwd}"
+  apiurl += "&fileid=#{fileid}&filename=#{filename}"
+  
+  res = response(apiurl).body
+  
+  if res =~ /File deleted/
     raise FileDeletedException
   end
-  if page =~ /The uploader has removed this/
-    raise FileDeletedException
-  end
-  if page =~ /<form id="[^"]*" action="([^"]*)"/
-    page = post($1 + '#dlt', {'dl.start'=> 'Free'})
-    if page =~ /You have reached the download limit for free-users/
+  if res =~ /ERROR: /
+    raise LinkErrorException
+  end 
+  if res =~ /You need to wait (.*) seconds/
+    if livebox
       raise DownloadLimitException
+    else
+      if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
+        puts "Wait #{time} seconds."
+      else
+        wait_indicator(time)
+      end
+      rapidshare(url, limit, livebox)
     end
-    if page =~ /Your IP address .* is already downloading a file/
-      raise DownloadInProgress
-    end
-    if page =~ /Currently a lot of users are downloading files/ or
-       page =~ /Unfortunately right now our servers are overloaded/
-      raise ServerBusyException
-    end
-    page =~ /<form name="[^"]*" action="([^"]*)"/
-    url = $1
-    page =~ /var c=([0-9]*);/
-    time = $1.to_i
+  elsif res =~ /DL:([^,]*),([^,]*),([^,]*)/
+    host = $1
+    dlauth = $2
+    time = $3.to_i
     if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
       puts "Wait #{time} seconds."
     else
       wait_indicator(time)
     end
-    wget(url, limit)
+    url = "http://#{host}/cgi-bin/rsapi.cgi?sub=download_v1&"
+    url += "dlauth=#{dlauth}&fileid=#{fileid}&filename=#{filename}"
+    wget(url, limit, filename)
   end
 end
-
-
 
 def przeklej_login_cookies(user, passwd)
   url = URI.parse('http://www.przeklej.pl/loguj')
@@ -261,7 +287,8 @@ def przeklej(url, limit=false, user=nil, passwd=nil)
     uri = $1
   end
   if page =~ /B..dny parametr w linku/
-    raise LinkErrorException
+    url =~ /.*\/(.*)/
+    raise LinkErrorException $1
   end
   if page =~ /title="Pobierz plik">([^<]*)<\/a>/
     filename = fix_filename($1)
@@ -360,9 +387,9 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
       wrzuta(url, limit)
     when 'www.4shared.com'
       four_shared(url, limit)
-    when 'rapidshare.com'
+    when /rapidshare.*/
       begin
-        rapidshare(url, limit)
+        rapidshare(url, limit, livebox_passwd)
       rescue DownloadLimitException
         if livebox_passwd
           puts "Limit reached, change IP."
@@ -382,9 +409,10 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
           puts "Limit Reached"
         end
       rescue LinkErrorException
-        puts "Link Error"
+        puts "Link Error (#{url})"
       rescue FileDeletedException
-        puts "File was removed"
+        url =~ /.*\/(.*)/
+        puts "File '#{$1}' was removed"
       rescue ServerBusyException
         puts "Server is Buisy"
       rescue DownloadInProgress
@@ -404,9 +432,11 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
           puts "File too big for download (try to login)"
         end
       rescue FileDeletedException
-        puts "File Deleted"
+        url =~ /.*\/(.*)/
+        puts "File '#{$1}' Deleted"
       rescue LinkErrorException
-        puts "Link Error"
+        url =~ /.*\/(.*)/
+        puts "Link Error (#{$1})"
       end
     else
       puts "unknown host \"#{host(url)}\" - skip"
@@ -468,6 +498,9 @@ if filename
           rescue Timeout::Error, Errno::ETIMEDOUT
             puts "timeout Error, try again"
             redo
+          rescue NotConnectedException
+            puts 'Not connected'
+            break
           end
         end
       }
@@ -487,6 +520,10 @@ else
     if passwd and user and host(ARGV[0]) != 'www.przeklej.pl'
       puts "[warring] password is used only in 'przeklej.pl' site - ignore"
     end
-    download(ARGV[0], limit, user, passwd, livebox_passwd)
+    begin
+      download(ARGV[0], limit, user, passwd, livebox_passwd)
+    rescue NotConnectedException
+      puts 'Not connected'
+    end
   end
 end
