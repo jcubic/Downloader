@@ -213,6 +213,7 @@ def rapidshare(url, limit=false, livebox=nil)
   end
  
   if res =~ /You need to wait (.*) seconds/
+    time = $1.to_i
     if livebox
       raise DownloadLimitException
     else
@@ -355,34 +356,10 @@ def wrzuta(url, limit=false)
   end
 end
 
-def filesonic(url, limit)
-    url =~ /\/([^\/]*)$/
-    filename = $1
-    res = response(url)
-    referer = url
-    res['set-cookie'] =~ /(PHPSESSID=[^;]*);/
-    page = response(res['Location'], $1, referer).body
-    if page =~ /<a href="([^"]*)" id="free_download">/
-        page = response($1).body
-        #page =~ /var countDownDelay = ([0-9]*);/
-        #time = $1.to_i
-        page =~ /var downloadUrl = "([^"]*)"/
-        url = $1
-        #if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
-        #    puts "Wait #{time} seconds."
-        #else
-        #    wait_indicator(time)
-        #end
-        wget(url, limit, filename)
-    end
-end
-
 def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
   begin
     url = url.strip
     case host(url)
-    when 'www.filesonic.com'
-        filesonic(url, limit)
     when /.*\.wrzuta.pl/
       wrzuta(url, limit)
     when 'www.4shared.com'
@@ -397,13 +374,18 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
           begin
             disconnect('192.168.1.1', livebox_passwd)
             connect('192.168.1.1', livebox_passwd)
-            rapidshare(url, limit)
+            rapidshare(url, limit, livebox_passwd)
           rescue DownloadLimitException
             download(url, limit, nil, nil, livebox_passwd)
           rescue BadPasswordException
             puts "Bad password"
           rescue ServerBusyException
             puts "Server is Buisy"
+          rescue LinkErrorException
+            puts "Link Error (#{url})"
+          rescue FileDeletedException
+            url =~ /.*\/(.*)/
+            puts "File '#{$1}' was removed"
           end
         else
           puts "Limit Reached"
