@@ -7,7 +7,7 @@
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-#
+#r
 #    This program is distributed in the hope that it will be useful,
 #    but WITHOUT ANY WARRANTY; without even the implied warranty of
 #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -47,6 +47,10 @@ end
 
 class NotConnectedException < Exception
 end
+
+ROUTER_LIVEBOX = 0
+ROUTER_DLINK = 1
+
 
 def title(string)
   return string.split(' ').map {|word| word.capitalize }.join(' ')
@@ -142,14 +146,32 @@ def livebox_send(data, host, passwd)
   end
 end
 
-def connect(host, passwd)
-  data = {'ACTION_CONNECT' => 'Po&#322;&#261;cz'}
-  livebox_send(data, host, passwd)
+
+
+def connect(router, host, passwd)
+  case router
+  when ROUTER_LIVEBOX
+    data = {'ACTION_CONNECT' => 'Po&#322;&#261;cz'}
+    livebox_send(data, host, passwd)
+  when ROUTER_DLINK
+    referer = "http://#{host}/wan.cgi"
+    post("http://#{host}/index.html", {"username"=>"admin","password"=>passwd})
+    response("http://#{host}/wanpvc.cmd?ifname=ppp_0_0_35_10", nil, referer)
+    response("http://#{host}/logout.html")
+  end
 end
 
-def disconnect(host, passwd)
-  data = {'ACTION_DISCONNECT'=> 'Roz&#322;&#261;cz'}
-  livebox_send(data, host, passwd)
+def disconnect(router, host, passwd)
+  case router
+  when ROUTER_LIVEBOX
+    data = {'ACTION_DISCONNECT'=> 'Roz&#322;&#261;cz'}
+    livebox_send(data, host, passwd)
+  when ROUTER_DLINK
+    referer =  "http://#{host}/wan.cgi"
+    post("http://#{host}/index.html", {"username"=>"admin","password"=>passwd})
+    response("http://#{host}/wanpvc.cmd?ifname=ppp_0_0_35_11", nil, referer)
+    response("http://#{host}/logout.html")
+  end
 end
 
 def wget(url, limit=false, filename=nil, referer=nil, cookies=nil)
@@ -194,7 +216,7 @@ def four_shared(url, limit=false)
   end
 end
 
-def rapidshare(url, limit=false, livebox=nil)
+def rapidshare(url, limit=false, router=nil)
   #download files using rapidshare api
   if not url =~ /files\/([^\/]*)\/(.*)/
     raise LinkErrorException
@@ -211,10 +233,12 @@ def rapidshare(url, limit=false, livebox=nil)
   if res =~ /File deleted/
     raise FileDeletedException
   end
- 
-  if res =~ /You need to wait (.*) seconds/
+  if res =~ /All free download slots are full/
+    raise ServerBusyException
+  end
+  if res =~ /You need to wait ([0-9]*) seconds/
     time = $1.to_i
-    if livebox
+    if router
       raise DownloadLimitException
     else
       if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
@@ -222,7 +246,7 @@ def rapidshare(url, limit=false, livebox=nil)
       else
         wait_indicator(time)
       end
-      rapidshare(url, limit, livebox)
+      rapidshare(url, limit, router)
     end
   elsif res =~ /ERROR: /
     raise LinkErrorException
@@ -356,7 +380,7 @@ def wrzuta(url, limit=false)
   end
 end
 
-def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
+def download(url, limit, user=nil, passwd=nil, router=nil, router_passwd=nil)
   begin
     url = url.strip
     case host(url)
@@ -366,17 +390,18 @@ def download(url, limit, user=nil, passwd=nil, livebox_passwd=nil)
       four_shared(url, limit)
     when /rapidshare.*/
       begin
-        rapidshare(url, limit, livebox_passwd)
+        rapidshare(url, limit, router)
       rescue DownloadLimitException
-        if livebox_passwd
+        if router
           puts "Limit reached, change IP."
           #double check
           begin
-            disconnect('192.168.1.1', livebox_passwd)
-            connect('192.168.1.1', livebox_passwd)
-            rapidshare(url, limit, livebox_passwd)
+            disconnect('192.168.1.1', router, router_passwd)
+            sleep(5)
+            connect('192.168.1.1', router, router_passwd)
+            rapidshare(url, limit, router)
           rescue DownloadLimitException
-            download(url, limit, nil, nil, livebox_passwd)
+            download(url, limit, nil, nil, router, router_passwd)
           rescue BadPasswordException
             puts "Bad password"
           rescue ServerBusyException
@@ -435,22 +460,24 @@ def usage()
   puts "            [-r | --limit-rate <limit>] [--help]"
   puts "            [-l | --livebox-passwd <password>]"
   puts "            (-f | --file <filename>) | <url>"
-  puts "\n-u --user [user]        - user for przeklej.pl"
-  puts "-p --passwd [password]  - passowrd for przeklej.pl"
-  puts "-r --limit-rate [rate]  - slow down file transfer" 
-  puts "-l --livebox-passwd     - password if you using Orange livebox"
-  puts "                          for automatic reconect (change ADSL dynamic IP)"
+  puts "\n-u --user <user>      - user for przeklej.pl"
+  puts "-p --passwd <password>  - passowrd for przeklej.pl"
+  puts "-r --limit-rate <rate>  - slow down file transfer" 
+  puts "-s --router-passwd      - password if you using router with ADSL"
+  puts "                          for automatic reconect when download from"
+  puts "                          rapidshare"
+  puts "-d --router <name>        router livebox or dlink"
   puts "-f --file [filename]    - file with urls to download"
 end
 
 begin 
-  opts = GetOpt.new(
-                    ["--file", "-f", GetoptLong::REQUIRED_ARGUMENT],
+  opts = GetOpt.new(["--file", "-f", GetoptLong::REQUIRED_ARGUMENT],
                     ["--limit-rate", "-r", GetoptLong::REQUIRED_ARGUMENT],
                     ["--user", "-u", GetoptLong::REQUIRED_ARGUMENT],
                     ["--passwd", "-p", GetoptLong::REQUIRED_ARGUMENT],
                     ["--help", "-h", GetoptLong::NO_ARGUMENT],
-                    ["--livebox-passwd", "-l", GetoptLong::REQUIRED_ARGUMENT])
+                    ["--router-passwd", "-s", GetoptLong::REQUIRED_ARGUMENT],
+                    ["--router", "-d", GetoptLong::REQUIRED_ARGUMENT])
 rescue GetoptLong::InvalidOption
   usage
   exit(1)
@@ -466,8 +493,16 @@ limit = opts['--limit-rate']
 #user and password for 'przeklej.pl' only
 user = opts['--user']
 passwd = opts['--passwd']
-livebox_passwd = opts['--livebox-passwd']
+router_passwd = opts['--router-passwd']
 
+case opts['--router'].downcase
+when 'livebox'
+  router = ROUTER_LIVEBOX
+when 'dlink'
+  router = ROUTER_DLINK
+else
+  router = nil
+end
 
 if filename
   begin
@@ -476,7 +511,8 @@ if filename
         #skip blank lines, comments and invalid urls
         if not url =~ /^ *$/ and not url =~ /^ *#.*$/ and url =~ /^http:\/\//
           begin
-            download(url, limit, user, passwd, livebox_passwd)
+            puts "download: #{url}"
+            download(url, limit, user, passwd, router, router_passwd)
           rescue Timeout::Error, Errno::ETIMEDOUT
             puts "timeout Error, try again"
             redo
@@ -503,7 +539,7 @@ else
       puts "[warring] password is used only in 'przeklej.pl' site - ignore"
     end
     begin
-      download(ARGV[0], limit, user, passwd, livebox_passwd)
+      download(ARGV[0], limit, user, passwd, router, router_passwd)
     rescue NotConnectedException
       puts 'Not connected'
     end

@@ -13,9 +13,11 @@ download.rb <url>
 If you have file with urls
 download.rb -f <filename>
 
-If you have live box you can't use reconection when download file from Rapidshare
-download.rb -l <your livebox password> -f <filename>
+If you have ADSL router you can't use reconection when download file from Rapidshare
+download.rb -s <router password> -f <filename> -d <router type>
+
+supported router type: livebox and dlink (tested on D-LINK DSL-2640B)
 
 If you download file from przeklej.pl you can provide password and login for download file larger than 50MB
 
-download.rb -u <user name> -p <password> -f <filename>
+download.rb -u <user name> -p <password> (-f <filename> | url)
