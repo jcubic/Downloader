@@ -20,6 +20,7 @@ require 'net/http'
 require 'uri'
 require 'getoptlong'
 require 'rexml/document'
+require 'net/telnet'
 
 class DownloadLimitException < Exception
 end
@@ -93,6 +94,9 @@ def response(url, cookies=nil, referer=nil)
   end
   url = URI.parse(trail_slash(url))
   http = Net::HTTP.new(url.host)
+  if !http
+    raise NotConnectedException
+  end
   headers = {}
   if cookies
     headers['Cookie'] = cookies
@@ -108,6 +112,7 @@ def response(url, cookies=nil, referer=nil)
     end
     res = http.get(path, headers)
   rescue NoMethodError
+    #puts "fail: #{url}"
     raise NotConnectedException
   end
   return res
@@ -148,31 +153,30 @@ end
 
 
 
-def connect(router, host, passwd)
-  case router
-  when ROUTER_LIVEBOX
-    data = {'ACTION_CONNECT' => 'Po&#322;&#261;cz'}
-    livebox_send(data, host, passwd)
-  when ROUTER_DLINK
-    referer = "http://#{host}/wan.cgi"
-    post("http://#{host}/index.html", {"username"=>"admin","password"=>passwd})
-    response("http://#{host}/wanpvc.cmd?ifname=ppp_0_0_35_10", nil, referer)
-    response("http://#{host}/logout.html")
-  end
+def livebox_connect(host, passwd)
+  data = {'ACTION_CONNECT' => 'Po&#322;&#261;cz'}
+  livebox_send(data, host, passwd)
 end
 
-def disconnect(router, host, passwd)
-  case router
-  when ROUTER_LIVEBOX
-    data = {'ACTION_DISCONNECT'=> 'Roz&#322;&#261;cz'}
-    livebox_send(data, host, passwd)
-  when ROUTER_DLINK
-    referer =  "http://#{host}/wan.cgi"
-    post("http://#{host}/index.html", {"username"=>"admin","password"=>passwd})
-    response("http://#{host}/wanpvc.cmd?ifname=ppp_0_0_35_11", nil, referer)
-    response("http://#{host}/logout.html")
-  end
+def livebox_disconnect(host, passwd)
+  data = {'ACTION_DISCONNECT'=> 'Roz&#322;&#261;cz'}
+  livebox_send(data, host, passwd)
 end
+
+def dlink_reconnect(host, passwd)
+  server = Net::Telnet::new('Host'=>host,
+                            'Port'=> 23,
+                            'Timeout'=>25,
+                            'Prompt'=> />/)
+  server.waitfor(/ogin:/)
+  server.print("admin\n")
+  server.waitfor(/ssword:/)
+  server.print("#{passwd}\n")
+  server.cmd("adsl connection --down")
+  server.cmd("adsl connection --up")
+  server.cmd("logout")
+end
+
 
 def wget(url, limit=false, filename=nil, referer=nil, cookies=nil)
   params = '-c -U Mozilla --keep-session-cookies' 
@@ -235,6 +239,9 @@ def rapidshare(url, limit=false, router=nil)
   end
   if res =~ /All free download slots are full/
     raise ServerBusyException
+  end
+  if res =~ /You need RapidPro to download more files/
+    raise DownloadInProgress
   end
   if res =~ /You need to wait ([0-9]*) seconds/
     time = $1.to_i
@@ -396,9 +403,14 @@ def download(url, limit, user=nil, passwd=nil, router=nil, router_passwd=nil)
           puts "Limit reached, change IP."
           #double check
           begin
-            disconnect('192.168.1.1', router, router_passwd)
-            sleep(5)
-            connect('192.168.1.1', router, router_passwd)
+            if router == ROUTER_DLINK
+              dlink_reconnect('192.168.1.1', router_passwd)
+              puts "wait 5 second to reconect the router"
+              sleep(5)
+            elsif router == ROUTER_LIVEBOX
+              livebox_disconnect('192.168.1.1', router_passwd)
+              livebox_connect('192.168.1.1', router_passwd)
+            end
             rapidshare(url, limit, router)
           rescue DownloadLimitException
             download(url, limit, nil, nil, router, router_passwd)
@@ -495,11 +507,15 @@ user = opts['--user']
 passwd = opts['--passwd']
 router_passwd = opts['--router-passwd']
 
-case opts['--router'].downcase
-when 'livebox'
-  router = ROUTER_LIVEBOX
-when 'dlink'
-  router = ROUTER_DLINK
+if opts['--router']
+  case opts['--router'].downcase
+  when 'livebox'
+    router = ROUTER_LIVEBOX
+  when 'dlink'
+    router = ROUTER_DLINK
+  else
+    router = nil
+  end
 else
   router = nil
 end
