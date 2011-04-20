@@ -7,7 +7,7 @@
 #    it under the terms of the GNU General Public License as published by
 #    the Free Software Foundation, either version 3 of the License, or
 #    (at your option) any later version.
-#r
+#
 #    This program is distributed in the hope that it will be useful,
 #    but WITHOUT ANY WARRANTY; without even the implied warranty of
 #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -17,6 +17,7 @@
 #    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 require 'net/http'
+require 'net/https'
 require 'uri'
 require 'getoptlong'
 require 'rexml/document'
@@ -51,6 +52,15 @@ end
 
 ROUTER_LIVEBOX = 0
 ROUTER_DLINK = 1
+
+class Net::HTTP
+  alias_method :old_initialize, :initialize
+  def initialize(*args)
+    old_initialize(*args)
+    @ssl_context = OpenSSL::SSL::SSLContext.new
+    @ssl_context.verify_mode = OpenSSL::SSL::VERIFY_NONE
+  end
+end
 
 
 def title(string)
@@ -118,6 +128,15 @@ def response(url, cookies=nil, referer=nil)
   return res
 end
 
+def head(url)
+  if url =~ /(\?.*)/
+    query = $1
+  end
+  url = URI.parse(trail_slash(url))
+  http = Net::HTTP.new(url.host)
+  return http.request_head(url.path + query)
+end
+  
 def post(url, data)
   url = URI.parse(trail_slash(url))
   res = Net::HTTP.post_form(url, data)
@@ -129,11 +148,11 @@ end
 
 def wait_indicator(time)
   while time >= 0
-    system('tput sc; echo -n "Wait ' + time.to_s + ' seconds  "; tput rc') 
+    system('tput sc; echo -n " Wait ' + time.to_s + ' seconds  "; tput rc') 
     sleep(1)
     time -= 1
   end
-  puts "done              "
+  puts "done               "
 end
 
 def livebox_send(data, host, passwd)
@@ -178,8 +197,9 @@ def dlink_reconnect(host, passwd)
 end
 
 
-def wget(url, limit=false, filename=nil, referer=nil, cookies=nil)
-  params = '-c -U Mozilla --keep-session-cookies' 
+def wget(url, limit=false, filename=nil, referer=nil, cookies=nil, try=nil)
+  agent = '"Mozilla/5.0 (X11; U; Linux i686; pl-PL; rv:1.9.2.12) Gecko/20101027 Ubuntu/10.10 (maverick) Firefox/3.6.12 GTB7.1"'
+  params = "-c -U #{agent} --keep-session-cookies --content-disposition" 
   if limit
     params += " --limit-rate=#{limit}" 
   end
@@ -192,11 +212,36 @@ def wget(url, limit=false, filename=nil, referer=nil, cookies=nil)
   if referer
     params += " --referer=\"#{referer}\""
   end
+  if try
+    params += " -t #{try}"
+  end
+  params += " -v"
   `wget #{params} "#{url}"`
 end
 
+def curl(url, limit=nil, filename=nil, referer=nil, cookies=nil)
+  agent = '"Mozilla/5.0 (X11; U; Linux i686; pl-PL; rv:1.9.2.12) Gecko/20101027 Ubuntu/10.10 (maverick) Firefox/3.6.12 GTB7.1"'
+  params = "-A #{agent} -L --progress-bar" 
+  if limit
+    params += " --limit-rate #{limit}" 
+  end
+  if filename
+    params += " -o \"#{filename}\""
+  end
+  if cookies
+    params += " -b \"#{cookies}\""
+  end
+  if referer
+    params += " -e \"#{referer}\""
+  end
+  #debug " -D -I -N" # no buffer debug only head
+  `curl #{params} #{url}`
+end
+
+
 def four_shared(url, limit=false)
   res = response(url)
+  referer = url
   if res.body =~ /a href="([^"]*)" class="dbtn"/
     page = response($1, res.response['set-cookie'], url).body
     cookies_filename = 'download_4shared_cookies.txt'
@@ -208,14 +253,15 @@ def four_shared(url, limit=false)
       page =~ /<b class="blue xlargen">([^<]*)</
       filename = $1
       page =~ /var c[= ]+([0-9]*);/
-	  time = $1.to_i
+	  time = $1.to_i+1
       if RUBY_PLATFORM =~ /(:?mswin|mingw)/i
         puts "Wait #{time} seconds."
       else
         #use nice wait indicator on unix (require tput)
         wait_indicator(time)
       end
-      wget(url, limit, filename, nil, cookies_filename)
+      
+      curl(url, limit, filename, referer, res.response['set-cookie'])
     end
   end
 end
@@ -227,21 +273,29 @@ def rapidshare(url, limit=false, router=nil)
   end
   fileid = $1
   filename = $2
-  apiurl = 'http://api.rapidshare.com/cgi-bin/rsapi.cgi?sub=download_v1'
+  host = "api.rapidshare.com"
+  apiurl = '/cgi-bin/rsapi.cgi?sub=download'
   #use it for premium users
   #url += "&login=#{login}&password=#{passwd}"
   apiurl += "&fileid=#{fileid}&filename=#{filename}"
-  
-  res = response(apiurl).body
-  
+  http = Net::HTTP.new(host, 443)
+  http.use_ssl = true
+  res = http.get(apiurl).body
+  #res = response(res['location']).body
   if res =~ /File deleted/
     raise FileDeletedException
+  end
+  if res =~ /You are already downloading/
+    raise DownloadInProgress
   end
   if res =~ /All free download slots are full/
     raise ServerBusyException
   end
   if res =~ /You need RapidPro to download more files/
     raise DownloadInProgress
+  end
+  if res =~ /Please stop flooding our download/ and router
+    raise DownloadLimitException
   end
   if res =~ /You need to wait ([0-9]*) seconds/
     time = $1.to_i
@@ -266,9 +320,10 @@ def rapidshare(url, limit=false, router=nil)
     else
       wait_indicator(time)
     end
-    url = "http://#{host}/cgi-bin/rsapi.cgi?sub=download_v1&"
+    url = "http://#{host}/cgi-bin/rsapi.cgi?sub=download&"
     url += "dlauth=#{dlauth}&fileid=#{fileid}&filename=#{filename}"
-    wget(url, limit, filename)
+    #head(url).response.each {|k,v| puts "#{k}: #{v}"}
+    wget(url, limit, filename, nil, nil, 3)
   end
 end
 
@@ -369,6 +424,8 @@ def wrzuta(url, limit=false)
   end
   if page =~ /'lang' : '([^']*)',/
     lang = $1
+  else
+    lang = 'pl'
   end
   if key and login and host and site and lang
     if lang == 'pl'
@@ -380,7 +437,6 @@ def wrzuta(url, limit=false)
     url = "http://#{login}.#{host}/xml/#{_local2}/#{key}/sa/#{site}/#{rnd}"
     
     xml = REXML::Document.new(response(url).body).root
-    
     url = xml.elements['//file/storeIds/fileId'][0]
     filename = xml.elements['//name'][0]
     wget(url, limit, filename)
@@ -437,7 +493,7 @@ def download(url, limit, user=nil, passwd=nil, router=nil, router_passwd=nil)
       rescue DownloadInProgress
         puts "You are already downloading"
       end
-    when 'www.przeklej.pl'
+    when /(www\.)?przeklej\.pl/
       begin
         przeklej(url, limit)
       rescue FileToBigException
