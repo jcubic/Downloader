@@ -51,7 +51,8 @@ class NotConnectedException < Exception
 end
 
 ROUTER_LIVEBOX = 0
-ROUTER_DLINK = 1
+ROUTER_LIVEBOX_2 = 1
+ROUTER_DLINK = 2
 
 class Net::HTTP
   alias_method :old_initialize, :initialize
@@ -170,8 +171,6 @@ def livebox_send(data, host, passwd)
   end
 end
 
-
-
 def livebox_connect(host, passwd)
   data = {'ACTION_CONNECT' => 'Po&#322;&#261;cz'}
   livebox_send(data, host, passwd)
@@ -181,6 +180,25 @@ def livebox_disconnect(host, passwd)
   data = {'ACTION_DISCONNECT'=> 'Roz&#322;&#261;cz'}
   livebox_send(data, host, passwd)
 end
+
+def livebox_2_reconnect(host, passwd)
+  server = Net::Telnet::new('Host'=>host,
+                            'Port'=> 23,
+                            'Timeout'=>25,
+                            'Prompt'=> /\]\$/)
+  server.waitfor(/ogin:/)
+  server.print("root\n")
+  server.waitfor(/ssword:/)
+  server.print("#{passwd}\n")
+  server.cmd('sndcp')
+  server.cmd('pppoastop 0')
+  server.waitfor(/\[root/)
+  server.cmd('pppoastart 0')
+  server.waitfor(/\[root/)
+  server.cmd("exit")
+  server.cmd("exit")
+end
+
 
 def dlink_reconnect(host, passwd)
   server = Net::Telnet::new('Host'=>host,
@@ -443,7 +461,7 @@ def wrzuta(url, limit=false)
   end
 end
 
-def download(url, limit, user=nil, passwd=nil, router=nil, router_passwd=nil)
+def download(url, limit, user=nil, passwd=nil, router=nil, host=nil, router_passwd=nil)
   begin
     url = url.strip
     case host(url)
@@ -460,16 +478,18 @@ def download(url, limit, user=nil, passwd=nil, router=nil, router_passwd=nil)
           #double check
           begin
             if router == ROUTER_DLINK
-              dlink_reconnect('192.168.1.1', router_passwd)
+              dlink_reconnect(host, router_passwd)
               puts "wait 5 second to reconect the router"
               sleep(5)
             elsif router == ROUTER_LIVEBOX
-              livebox_disconnect('192.168.1.1', router_passwd)
-              livebox_connect('192.168.1.1', router_passwd)
+              livebox_disconnect(host, router_passwd)
+              livebox_connect(host, router_passwd)
+            elsif router == ROUTER_LIVEBOX_2
+              livebox_2_reconnect(host, router_passwd)
             end
             rapidshare(url, limit, router)
           rescue DownloadLimitException
-            download(url, limit, nil, nil, router, router_passwd)
+            download(url, limit, nil, nil, router, host, router_passwd)
           rescue BadPasswordException
             puts "Bad password"
           rescue ServerBusyException
@@ -567,6 +587,8 @@ if opts['--router']
   case opts['--router'].downcase
   when 'livebox'
     router = ROUTER_LIVEBOX
+  when 'livebox2'
+    router = ROUTER_LIVEBOX_2
   when 'dlink'
     router = ROUTER_DLINK
   else
@@ -574,6 +596,12 @@ if opts['--router']
   end
 else
   router = nil
+end
+
+if opts['--router-host']
+  host = opts['--router-host']
+else
+  host = '192.168.1.1'
 end
 
 if filename
@@ -584,7 +612,7 @@ if filename
         if not url =~ /^ *$/ and not url =~ /^ *#.*$/ and url =~ /^http:\/\//
           begin
             puts "download: #{url}"
-            download(url, limit, user, passwd, router, router_passwd)
+            download(url, limit, user, passwd, router, host, router_passwd)
           rescue Timeout::Error, Errno::ETIMEDOUT
             puts "timeout Error, try again"
             redo
@@ -598,7 +626,6 @@ if filename
   rescue Interrupt, Errno::EINTR
     #silent exit
     exit(1)
-  
   end
 else
   if ARGV.length == 0
@@ -611,7 +638,7 @@ else
       puts "[warring] password is used only in 'przeklej.pl' site - ignore"
     end
     begin
-      download(ARGV[0], limit, user, passwd, router, router_passwd)
+      download(ARGV[0], limit, user, passwd, router, host, router_passwd)
     rescue NotConnectedException
       puts 'Not connected'
     end
